@@ -1,6 +1,5 @@
 export default {
   async fetch(request, env) {
-    // 1. Si abres la página en el navegador (GET), muestra un chat listo para usar
     if (request.method === "GET") {
       const html = `
       <!DOCTYPE html>
@@ -8,38 +7,53 @@ export default {
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Mi Chat con Claude</title>
+        <title>Mi IA en la Nube</title>
         <style>
-          body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background: #121212; color: #fff; }
-          textarea { width: 100%; height: 100px; padding: 10px; border-radius: 8px; background: #1e1e1e; color: #fff; border: 1px solid #333; }
-          button { margin-top: 10px; padding: 10px 20px; background: #d97757; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
-          #respuesta { margin-top: 20px; padding: 15px; background: #1e1e1e; border-radius: 8px; white-space: pre-wrap; }
+          body { margin: 0; font-family: system-ui, sans-serif; background: #212121; color: #ececec; display: flex; flex-direction: column; height: 100vh; }
+          #chat { flex: 1; overflow-y: auto; padding: 20px; max-width: 750px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+          .msg { margin-bottom: 16px; padding: 12px 16px; border-radius: 12px; line-height: 1.5; white-space: pre-wrap; }
+          .user { background: #2f2f2f; align-self: flex-end; margin-left: 20%; }
+          .bot { background: #171717; border: 1px solid #333; margin-right: 10%; }
+          #form { display: flex; gap: 10px; padding: 15px; max-width: 750px; width: 100%; margin: 0 auto; box-sizing: border-box; background: #212121; }
+          input { flex: 1; padding: 14px; border-radius: 24px; border: 1px solid #444; background: #2f2f2f; color: white; font-size: 16px; outline: none; }
+          button { padding: 0 22px; border-radius: 24px; border: none; background: #10a37f; color: white; font-weight: bold; cursor: pointer; }
         </style>
       </head>
       <body>
-        <h2>Chat con Claude (Cloudflare)</h2>
-        <textarea id="prompt" placeholder="Escribe tu pregunta para Claude..."></textarea>
-        <button onclick="enviar()">Enviar a Claude</button>
-        <div id="respuesta">Aquí aparecerá la respuesta...</div>
-
+        <div id="chat"><div class="msg bot">Hola, estoy corriendo gratis en tu nube de Cloudflare. ¿En qué te ayudo?</div></div>
+        <form id="form" onsubmit="enviar(event)">
+          <input id="input" placeholder="Escribe un mensaje..." autocomplete="off" required />
+          <button type="submit">Enviar</button>
+        </form>
         <script>
-          async function enviar() {
-            const prompt = document.getElementById("prompt").value;
-            const div = document.getElementById("respuesta");
-            div.innerText = "Pensando...";
-            
+          const historial = [];
+          async function enviar(e) {
+            e.preventDefault();
+            const input = document.getElementById("input");
+            const chat = document.getElementById("chat");
+            const texto = input.value.trim();
+            if (!texto) return;
+
+            chat.innerHTML += '<div class="msg user">' + texto.replace(/</g, "&lt;") + '</div>';
+            input.value = "";
+            historial.push({ role: "user", content: texto });
+
+            const botDiv = document.createElement("div");
+            botDiv.className = "msg bot";
+            botDiv.innerText = "Escribiendo...";
+            chat.appendChild(botDiv);
+            chat.scrollTop = chat.scrollHeight;
+
             const res = await fetch("/", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ prompt })
+              body: JSON.stringify({ messages: historial })
             });
             const data = await res.json();
-            
-            if (data.content && data.content[0]) {
-              div.innerText = data.content[0].text;
-            } else {
-              div.innerText = "Error: " + JSON.stringify(data, null, 2);
-            }
+            const respuesta = data.response || "Error: " + JSON.stringify(data);
+            botDiv.innerText = respuesta;
+            historial.push({ role: "assistant", content: respuesta });
+            chat.scrollTop = chat.scrollHeight;
           }
         </script>
       </body>
@@ -47,26 +61,15 @@ export default {
       return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
 
-    // 2. Si envías un mensaje (POST), llama a la API de Claude usando tu secreto
     if (request.method === "POST") {
-      const { prompt } = await request.json();
-
-      const response = await fetch("https://anthropic.com", {
-        method: "POST",
-        headers: {
-          "x-api-key": env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1024,
-          messages: [{ role: "user", content: prompt }],
-        }),
+      const { messages } = await request.json();
+      const result = await env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast", {
+        messages: [
+          { role: "system", content: "Eres un asistente útil y claro. Responde siempre en español." },
+          ...messages
+        ],
       });
-
-      const data = await response.json();
-      return new Response(JSON.stringify(data), {
+      return new Response(JSON.stringify(result), {
         headers: { "Content-Type": "application/json" },
       });
     }
